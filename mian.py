@@ -296,27 +296,28 @@ class TransportationTable:
                 if transportation.quantity != '*':
                     transportations_cost += transportation.cost * transportation.quantity
         return int(transportations_cost)
+
 def print_matrix(matrix):
     for row in matrix:
-        print(' '.join(f"{x:5}" for x in row))
+        print(" ".join(f"{x:4}" for x in row))
 
 def print_transportations_cost(transport):
     for i in range(transport.dimension_rows):
         row = []
         for j in range(transport.dimension_columns):
-            row.append(f"{transport.get_element(i, j).cost:5}")
-        print(' '.join(row))
+            row.append(f"{transport.get_element(i, j).cost:4}")
+        print(" ".join(row))
 
 def print_transportations_quantity(transport):
     for i in range(transport.dimension_rows):
         row = []
         for j in range(transport.dimension_columns):
-            if transport.get_element(i, j).is_base:
-                row.append(f"{transport.get_element(i, j).quantity:5.1f}*")
+            elem = transport.get_element(i, j)
+            if elem.is_base:
+                row.append(f"{elem.quantity:4.0f}*")
             else:
-                row.append(f"{transport.get_element(i, j).quantity:5.1f} ")
-        print(' '.join(row))
-
+                row.append(f"{elem.quantity:4.0f} ")
+        print(" ".join(row))
 # ==============================================================================
 # ====== КЛАССЫ ДЛЯ СИМПЛЕКС-МЕТОДА ======
 # ==============================================================================
@@ -431,7 +432,6 @@ class SimplexSolver:
             constraint_expressions.append(coeffs)
             constraint_types.append(constraint_type)
             rhs_values.append(rhs_value)
-
         self.numVariables = max(all_var_indices) if all_var_indices else 0
         self.numSlackVariables = sum(1 for ct in constraint_types if ct != 0)
         objLower = objective.lower()
@@ -442,12 +442,10 @@ class SimplexSolver:
                 obj_coeffs[var] = -obj_coeffs[var]
             self.isMaximization = True
             print("Задача минимизации преобразована в максимизацию (целевая функция домножена на -1)")
-
         self.objCoeffs = [0.0] * (self.numVariables + self.numSlackVariables)
         for var, coeff in obj_coeffs.items():
             if 1 <= var <= self.numVariables:
                 self.objCoeffs[var - 1] = coeff
-
         self.numConstraints = len(constraints)
         tempTable = [[0.0] * (self.numVariables + self.numSlackVariables + 1) for _ in range(self.numConstraints)]
         slack_index = 0
@@ -464,14 +462,12 @@ class SimplexSolver:
                     tempTable[i][self.numVariables + slack_index] = -1.0
                 slack_index += 1
             tempTable[i][self.numVariables + self.numSlackVariables] = rhs_values[i]
-
         self.originalConstraints = [row[:] for row in tempTable]
         if not self.useDualSimplex:
             for i in range(self.numConstraints):
                 if tempTable[i][self.numVariables + self.numSlackVariables] < 0:
                     for j in range(self.numVariables + self.numSlackVariables + 1):
                         tempTable[i][j] = -tempTable[i][j]
-
         self.findBasisVariables(tempTable)
         self.buildSimplexTable(tempTable)
 
@@ -550,7 +546,6 @@ class SimplexSolver:
                 if is_unit_column and unit_row != -1 and not used[unit_row]:
                     self.basis.append(j)
                     used[unit_row] = True
-
         for i in range(self.numConstraints):
             if not used[i] and len(self.basis) < self.numConstraints:
                 for j in range(self.numVariables + self.numSlackVariables):
@@ -558,7 +553,6 @@ class SimplexSolver:
                         self.basis.append(j)
                         used[i] = True
                         break
-
         unique_basis = []
         for var in self.basis:
             if var not in unique_basis and len(unique_basis) < self.numConstraints:
@@ -575,7 +569,6 @@ class SimplexSolver:
         cols = len(self.nonBasis) + 1
         self.table = [[0.0] * cols for _ in range(rows)]
         self.solution = [0.0] * (self.numVariables + self.numSlackVariables)
-
         for i in range(len(self.basis)):
             basis_var = self.basis[i]
             constraint_row = -1
@@ -598,7 +591,6 @@ class SimplexSolver:
                 if b_index < len(tempTable[constraint_row]):
                     self.table[i][-1] = tempTable[constraint_row][b_index]
                     self.solution[basis_var] = self.table[i][-1]
-
         for j in range(len(self.nonBasis)):
             non_basis_var = self.nonBasis[j]
             delta = self.objCoeffs[non_basis_var] if non_basis_var < len(self.objCoeffs) else 0.0
@@ -607,7 +599,6 @@ class SimplexSolver:
                 coeff = self.objCoeffs[basis_var] if basis_var < len(self.objCoeffs) else 0.0
                 delta -= coeff * self.table[i][j]
             self.table[-1][j] = -delta if self.isMaximization else delta
-
         current_obj_value = 0.0
         for i in range(len(self.basis)):
             basis_var = self.basis[i]
@@ -641,10 +632,8 @@ class SimplexSolver:
         leaving_var = self.basis[pivot_row]
         old_table = [row[:] for row in self.table]
         pivot_element = old_table[pivot_row][pivot_col]
-
         for j in range(len(self.table[0])):
             self.table[pivot_row][j] = old_table[pivot_row][j] / pivot_element
-
         for i in range(len(self.table)):
             if i != pivot_row:
                 for j in range(len(self.table[0])):
@@ -653,7 +642,6 @@ class SimplexSolver:
         for i in range(len(self.table)):
             if i != pivot_row:
                 self.table[i][pivot_col] = -old_table[i][pivot_col] / pivot_element
-
         self.basis[pivot_row] = entering_var
         self.nonBasis[pivot_col] = leaving_var
         self.solution = [0.0] * (self.numVariables + self.numSlackVariables + 1)
@@ -730,7 +718,6 @@ class SimplexSolver:
             row = [self.originalConstraints[i][j] for i in range(self.numConstraints)]
             row.append(self.objCoeffs[j])
             dual_constraints.append(row)
-
         print("Двойственная задача:")
         prefix = "max: " if dual_is_max else "min: "
         terms = []
@@ -738,7 +725,6 @@ class SimplexSolver:
             sign = "+" if i > 0 and c >= 0 else ""
             terms.append(f"{sign}{c}y{i+1}")
         print(prefix + "".join(terms))
-
         print("Ограничения:")
         for j, row in enumerate(dual_constraints):
             terms = []
@@ -775,6 +761,7 @@ class SimplexSolver:
             self.printSolution()
             self.buildDualProblem()
             self.solveDualFromPrimal()
+
 
 class DualSimplexSolver(SimplexSolver):
     def __init__(self):
@@ -818,14 +805,14 @@ class DualSimplexSolver(SimplexSolver):
             if pivot_col == -1:
                 print("Задача неограничена")
                 return False
-            print(f"Итерация {iterations + 1}: разрешающий элемент: строка {pivot_row + 1}, столбец {pivot_col + 1} = {self.table[pivot_row][pivot_col]}")
+            print(
+                f"Итерация {iterations + 1}: разрешающий элемент: строка {pivot_row + 1}, столбец {pivot_col + 1} = {self.table[pivot_row][pivot_col]}")
             self.performPivot(pivot_row, pivot_col)
             iterations += 1
             print(f"Таблица после итерации {iterations}:")
             self.printTable()
         print("Превышено максимальное число итераций")
         return False
-
 # ==============================================================================
 # ====== ФУНКЦИИ КОНСОЛЬНОГО ИНТЕРФЕЙСА ======
 # ==============================================================================
@@ -931,31 +918,49 @@ def solveProblem_lp(useDual=False, solveBoth=False):
     try:
         if solveBoth:
             solver = SimplexSolver()
-            n_eq = int(input("Количество ограничений: "))
-            obj = input("Целевая функция: ").strip()
-            cons = [input(f"Ограничение {i+1}: ").strip() for i in range(n_eq)]
-            solver.convertToCanonicalForm(cons, obj)
+            numEquations = int(input("\n=== РЕШЕНИЕ ПРЯМОЙ И ДВОЙСТВЕННОЙ ЗАДАЧИ ===\nВведите количество ограничений: "))
+            constraints = []
+            print("\nВведите целевую функцию (например: max 2x1 + 3x2 или min 2x1 + 3x2):")
+            objective = input().strip()
+            print("\nВведите ограничения (по одному в строке):")
+            print("Используйте знаки: =, <=, >=")
+            for i in range(numEquations):
+                constraint = input(f"Ограничение {i + 1}: ").strip()
+                constraints.append(constraint)
+            solver.convertToCanonicalForm(constraints, objective)
             solver.solvePrimalAndDual()
         elif useDual:
             solver = DualSimplexSolver()
-            n_eq = int(input("Количество ограничений: "))
-            obj = input("Целевая функция: ").strip()
-            cons = [input(f"Ограничение {i+1}: ").strip() for i in range(n_eq)]
-            solver.convertToCanonicalForm(cons, obj)
-            solver.solve()
-            solver.printSolution()
+            solver.useDualSimplex = True
+            numEquations = int(input("\n=== РЕШЕНИЕ ЗАДАЧ ДВОЙСТВЕННЫМ СИМПЛЕКС-МЕТОДОМ ===\nВведите количество ограничений: "))
+            constraints = []
+            print("\nВведите целевую функцию (например: max 2x1 + 3x2 или min 2x1 + 3x2):")
+            objective = input().strip()
+            print("\nВведите ограничения (по одному в строке):")
+            print("Используйте знаки: =, <=, >=")
+            for i in range(numEquations):
+                constraint = input(f"Ограничение {i + 1}: ").strip()
+                constraints.append(constraint)
+            solver.convertToCanonicalForm(constraints, objective)
+            if solver.solve():
+                solver.printSolution()
         else:
             solver = SimplexSolver()
-            n_eq = int(input("Количество ограничений: "))
-            obj = input("Целевая функция: ").strip()
-            cons = [input(f"Ограничение {i+1}: ").strip() for i in range(n_eq)]
-            solver.convertToCanonicalForm(cons, obj)
-            solver.solve()
-            solver.printSolution()
+            numEquations = int(input("\n=== РЕШЕНИЕ ЗАДАЧ СИМПЛЕКС-МЕТОДОМ ===\nВведите количество ограничений: "))
+            constraints = []
+            print("\nВведите целевую функцию (например: max 2x1 + 3x2 или min 2x1 + 3x2):")
+            objective = input().strip()
+            print("\nВведите ограничения (по одному в строке):")
+            print("Используйте знаки: =, <=, >=")
+            for i in range(numEquations):
+                constraint = input(f"Ограничение {i + 1}: ").strip()
+                constraints.append(constraint)
+            solver.convertToCanonicalForm(constraints, objective)
+            if solver.solve():
+                solver.printSolution()
     except Exception as e:
-        print(f"Ошибка: {e}")
-    input("\nНажмите Enter...")
-
+        print(f"Ошибка: {str(e)}")
+    input("\nНажмите Enter для продолжения...")
 def check_optimality_interactive():
     print("\n=== ПРОВЕРКА ОПТИМАЛЬНОСТИ ТОЧКИ (3 переменные) ===")
     n = 3
@@ -1103,7 +1108,7 @@ def run_simplex_gui():
     ttk.Label(win, text="Целевая функция (например: max 2x1 + 3x2):").pack(pady=5)
     obj_entry = ttk.Entry(win, width=70)
     obj_entry.pack(pady=5)
-    obj_entry.insert(0, "max 2x1 + 3x2")
+    obj_entry.insert(0, "max 2x1 - x2 + 3x3 + x4")
     ttk.Label(win, text="Количество ограничений:").pack(pady=5)
     cons_count = ttk.Spinbox(win, from_=1, to=10, width=10)
     cons_count.pack(pady=5)
@@ -1118,10 +1123,10 @@ def run_simplex_gui():
         except: n = 2
         for i in range(n):
             lbl = ttk.Label(constraints_frame, text=f"Ограничение {i+1}:")
-            lbl.grid(row=i, column=0, sticky='e', padx=5, pady=2)
+            lbl.grid(row=i, column=0, sticky='e', padx=5, pady=3)
             ent = ttk.Entry(constraints_frame, width=50)
-            ent.grid(row=i, column=1, padx=5, pady=2)
-            ent.insert(0, ["2x1 + x2 <= 10", "x1 + 3x2 <= 15"][i] if i < 2 else "")
+            ent.grid(row=i, column=1, padx=5, pady=3)
+            ent.insert(0, ["2x1 + x2 - 3x3 = 10", "x1 + x3 + x4 = 7", "3x1 + 2x3 - x5 = -4"][i] if i < 3 else "")
             cons_entries.append(ent)
     ttk.Button(win, text="Обновить ограничения", command=update_constraints).pack(pady=10)
     update_constraints()
@@ -1238,11 +1243,10 @@ def run_primal_dual_gui():
         except Exception as e:
             print(f"Ошибка: {e}")
     ttk.Button(win, text="Решить", command=solve_and_display).pack(pady=10)
-
 def run_transport_gui():
     win = tk.Toplevel()
     win.title("Транспортная задача")
-    win.geometry("600x500")
+    win.geometry("650x600")
 
     ttk.Label(win, text="Поставщики (m):").pack(pady=2)
     m_ent = ttk.Entry(win, width=10)
@@ -1260,51 +1264,76 @@ def run_transport_gui():
     def create_fields():
         for w in frame.winfo_children():
             w.destroy()
+
         try:
             m = int(m_ent.get())
             n = int(n_ent.get())
-        except:
+        except ValueError:
             m, n = 3, 5
 
-        ttk.Label(frame, text="Предложения A:").grid(row=0, column=0, sticky='e')
-        a_ent = ttk.Entry(frame, width=30)
-        a_ent.grid(row=0, column=1)
+        ttk.Label(frame, text="Предложения A (через пробел):").grid(row=0, column=0, sticky='e')
+        a_ent = ttk.Entry(frame, width=40)
+        a_ent.grid(row=0, column=1, padx=5, pady=2)
         a_ent.insert(0, "250 200 220")
 
-        ttk.Label(frame, text="Спрос B:").grid(row=1, column=0, sticky='e')
-        b_ent = ttk.Entry(frame, width=30)
-        b_ent.grid(row=1, column=1)
+        ttk.Label(frame, text="Спрос B (через пробел):").grid(row=1, column=0, sticky='e')
+        b_ent = ttk.Entry(frame, width=40)
+        b_ent.grid(row=1, column=1, padx=5, pady=2)
         b_ent.insert(0, "140 110 170 90 140")
 
-        ttk.Label(frame, text="Тарифы C (по строкам):").grid(row=2, column=0, sticky='nw')
-        c_txt = tk.Text(frame, width=30, height=4)
-        c_txt.grid(row=2, column=1)
+        ttk.Label(frame, text="Тарифы C (по строкам, через пробел):").grid(row=2, column=0, sticky='nw')
+        c_txt = tk.Text(frame, width=40, height=5)
+        c_txt.grid(row=2, column=1, padx=5, pady=2)
         c_txt.insert("1.0", "4 3 4 5 3\n2 4 5 7 8\n4 3 7 2 1")
 
-        out = scrolledtext.ScrolledText(frame, width=60, height=15, font=("Courier", 9))
+        out = scrolledtext.ScrolledText(frame, width=75, height=15, font=("Courier", 9))
         out.grid(row=4, column=0, columnspan=2, pady=10)
+
+        def safe_int_list(s, expected_len, name):
+            try:
+                vals = list(map(int, s.split()))
+                if len(vals) != expected_len:
+                    raise ValueError(f"Ожидалось {expected_len} значений")
+                return vals
+            except Exception as e:
+                raise ValueError(f"Некорректные данные в '{name}': {e}")
+
+        def safe_matrix(text, rows, cols):
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            if len(lines) != rows:
+                raise ValueError(f"Ожидалось {rows} строк в матрице тарифов")
+            matrix = []
+            for i, line in enumerate(lines):
+                row = safe_int_list(line, cols, f"строке {i+1} тарифов")
+                matrix.append(row)
+            return matrix
 
         def solve():
             out.delete(1.0, tk.END)
             redirect_print_to_widget(out)
-            try:
-                A = list(map(int, a_ent.get().split()))
-                B = list(map(int, b_ent.get().split()))
-                raw_text = c_txt.get("1.0", tk.END).strip()
-                if not raw_text:
-                    print("Ошибка: матрица тарифов пуста!")
-                    return
-                lines = raw_text.splitlines()
-                C = []
-                for line in lines:
-                    stripped = line.strip()
-                    if stripped:
-                        row = list(map(int, stripped.split()))
-                        C.append(row)
-                if len(A) != m or len(B) != n or len(C) != m or any(len(row) != n for row in C):
-                    print("Ошибка: несоответствие размеров!")
-                    return
 
+            try:
+                m = int(m_ent.get())
+                n = int(n_ent.get())
+                A = safe_int_list(a_ent.get(), m, "предложениях A")
+                B = safe_int_list(b_ent.get(), n, "спросе B")
+                C = safe_matrix(c_txt.get("1.0", tk.END), m, n)
+            except ValueError as e:
+                print(f"❌ Ошибка ввода: {e}")
+                return
+            except Exception as e:
+                print(f"❌ Непредвиденная ошибка: {e}")
+                return
+
+            print(f"Размер таблицы: {m} x {n}")
+            print("Предложения A:", A)
+            print("Спрос B:", B)
+            print("Тарифы C:")
+            for row in C:
+                print(" ".join(map(str, row)))
+            print()
+
+            try:
                 transport = TransportationTable(m, n)
                 transport.producers = A
                 transport.consumers = B
@@ -1313,51 +1342,48 @@ def run_transport_gui():
                         transport.get_element(i, j).cost = C[i][j]
 
                 if not transport.check_balance():
-                    print('Исходная задача не закрыта')
+                    print("Исходная задача не закрыта → добавляем фиктивного...")
                     transport.balance()
-                    print('Закрытая задача:')
-                    print(f'Размер таблицы: {transport.dimension_rows} x {transport.dimension_columns}')
-                    print('Предложения производителей:', transport.producers)
-                    print('Спрос потребителей:', transport.consumers)
-                    print('Тарифы перевозок:')
-                    print_transportations_cost(transport)
+                    # Устанавливаем тарифы для фиктивного столбца/строки в 0
+                    if len(transport.consumers) > n:  # фиктивный потребитель
+                        for i in range(transport.dimension_rows):
+                            transport.get_element(i, -1).cost = 0
+                    elif len(transport.producers) > m:  # фиктивный поставщик
+                        for j in range(transport.dimension_columns):
+                            transport.get_element(-1, j).cost = 0
+                    print(f"Новая размерность: {transport.dimension_rows} x {transport.dimension_columns}")
                 else:
-                    print('Исходная задача закрыта')
-                print()
+                    print("Исходная задача закрыта")
 
                 transport.north_west_corner()
-                print('Опорный план, полученный методом северо-западного угла:')
-                print_transportations_quantity(transport)
-                print(f'Стоимость перевозок согласно плану: {transport.calculate_transportations_cost()}')
-                print()
-
                 if transport.check_degeneracy():
-                    print('Полученный план - вырожденный')
+                    print("План вырожден → устраняем вырожденность...")
                     transport.remove_degeneracy()
-                    print('Новый опорный план:')
-                    print_transportations_quantity(transport)
-                    print(f'Стоимость перевозок согласно плану: {transport.calculate_transportations_cost()}')
-                else:
-                    print('Полученный план не является вырожденным')
-                print()
 
-                count = 0
-                while not transport.potential_method():
-                    print(f'Оптимизация плана методом потенциалов, итерация №{count + 1}:')
-                    print_transportations_quantity(transport)
-                    print(f'Стоимость перевозок согласно плану: {transport.calculate_transportations_cost()}')
-                    count += 1
-                    print()
-
-                print('Оптимальный план, полученный методом потенциалов: ')
+                print("\nНачальный план:")
                 print_transportations_quantity(transport)
-                print(f'Стоимость перевозок согласно плану: {transport.calculate_transportations_cost()}')
+                print(f"Стоимость: {transport.calculate_transportations_cost()}")
+
+                # Оптимизация с лимитом итераций
+                max_iter = 100
+                iter_count = 0
+                while iter_count < max_iter:
+                    if transport.potential_method():
+                        break
+                    iter_count += 1
+                else:
+                    print(f"\n⚠️ Достигнут лимит итераций ({max_iter}). Решение может быть неоптимальным.")
+
+                print("\n✅ Оптимальный план:")
+                print_transportations_quantity(transport)
+                print(f"Минимальная стоимость: {transport.calculate_transportations_cost()}")
+
             except Exception as e:
-                print(f"Ошибка: {e}")
+                print(f"❌ Ошибка при решении: {e}")
 
-        ttk.Button(frame, text="Решить", command=solve).grid(row=3, column=0, columnspan=2, pady=5)
+        ttk.Button(frame, text="Решить транспортную задачу", command=solve).grid(row=3, column=0, columnspan=2, pady=10)
 
-    ttk.Button(win, text="Создать поля", command=create_fields).pack(pady=5)
+    ttk.Button(win, text="Создать поля ввода", command=create_fields).pack(pady=5)
     create_fields()
 def run_optimality_gui():
     win = tk.Toplevel()
