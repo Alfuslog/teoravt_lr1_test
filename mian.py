@@ -11,11 +11,12 @@ from typing import List
 import sys
 
 class TransportElement:
-    def __init__(self, row: int, col: int, quantity: float or str = '*', cost: int = -1):
+    def __init__(self, row: int, col: int, quantity: float | str = '*', cost: int = -1, is_base: bool = False):
         self._row = row
         self._col = col
         self._quantity = quantity
         self._cost = cost
+        self._is_base:bool = is_base
 
     @property
     def position_row(self) -> int:
@@ -27,7 +28,7 @@ class TransportElement:
 
     @property
     def quantity(self) -> float:
-        return self._quantity
+        return float(self._quantity) if self._quantity!='*' else 0
 
     @quantity.setter
     def quantity(self, quantity: float) -> None:
@@ -40,10 +41,18 @@ class TransportElement:
     @cost.setter
     def cost(self, cost: int) -> None:
         self._cost = cost
+            
+    @property
+    def is_base(self) -> bool:
+        return self._is_base
+            
+    @is_base.setter
+    def is_base(self, value: bool) -> None:
+        self._is_base = value
 
     def __eq__(self, other) -> bool:
         return (self._row == other.position_row and self._col == other.position_col and
-                self._quantity == other.quantity and self._cost == other.cost)
+                self._quantity == other.quantity and self._cost == other.cost and self._is_base == other.is_base)
 
     def __ne__(self, other) -> bool:
         return not self == other
