@@ -296,6 +296,8 @@ class TransportationTable:
                 if transportation.quantity != '*':
                     transportations_cost += transportation.cost * transportation.quantity
         return int(transportations_cost)
+
+
 def print_matrix(matrix):
     for row in matrix:
         print(' '.join(f"{x:5}" for x in row))
