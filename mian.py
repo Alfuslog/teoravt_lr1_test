@@ -57,7 +57,6 @@ class TransportElement:
     def __ne__(self, other) -> bool:
         return not self == other
 
-
 class TransportationTable:
     def __init__(self, rows_amount: int, cols_amount: int):
         self._rows_amount = rows_amount
@@ -322,8 +321,11 @@ def print_transportations_quantity(transport):
 # ====== КЛАССЫ ДЛЯ СИМПЛЕКС-МЕТОДА ======
 # ==============================================================================
 
+
 class SimplexSolver:
     def __init__(self):
+        self.artificial_vars = []
+        self.M = 10 ** 6
         self.table = []
         self.basis = []
         self.nonBasis = []
@@ -335,11 +337,7 @@ class SimplexSolver:
         self.isMaximization = True
         self.wasMinimization = False
         self.useDualSimplex = False
-        self.dualTable = []
-        self.dualBasis = []
-        self.dualNonBasis = []
-        self.dualSolution = []
-        self.dualObjCoeffs = []
+
         self.originalConstraints = []
 
     def setUseDualSimplex(self, useDual):
@@ -352,36 +350,41 @@ class SimplexSolver:
         expression = self.removeSpaces(expr)
         coeffs = {}
         max_var_index = 0
+
         is_minimization = False
-        if expression.startswith("max"):
+        if expression.lower().startswith("max"):
             expression = expression[3:]
-        elif expression.startswith("min"):
+        elif expression.lower().startswith("min"):
             expression = expression[3:]
             is_minimization = True
-        if expression and not (expression[0] in "+-"):
-            expression = "+" + expression
+
+        if expression and not (expression[0] in ['+', '-']):
+            expression = '+' + expression
+
         current_term = ""
         current_sign = 1.0
+
         for i in range(len(expression) + 1):
-            if i == len(expression) or expression[i] in "+-":
+            if i == len(expression) or expression[i] in ['+', '-']:
                 if current_term:
                     var_index, coeff = self.processTerm(current_term, current_sign)
                     if var_index > 0:
-                        coeffs[var_index] = coeff
+                        coeffs[var_index] = coeffs.get(var_index, 0.0) + coeff
                         if var_index > max_var_index:
                             max_var_index = var_index
                     current_term = ""
                 if i < len(expression):
-                    current_sign = 1.0 if expression[i] == "+" else -1.0
+                    current_sign = 1.0 if expression[i] == '+' else -1.0
             else:
                 current_term += expression[i]
+
         return coeffs, max_var_index, is_minimization
 
     def processTerm(self, term, sign):
-        term = term.replace("*", "")
-        if "x" not in term:
+        term = term.replace('*', '')
+        if 'x' not in term:
             return 0, 0.0
-        x_pos = term.find("x")
+        x_pos = term.find('x')
         coeff_part = term[:x_pos]
         var_part = term[x_pos + 1:]
         coefficient = 1.0
@@ -391,7 +394,7 @@ class SimplexSolver:
             except:
                 coefficient = 1.0
         var_index = 1
-        digits = "".join(filter(str.isdigit, var_part))
+        digits = ''.join(filter(str.isdigit, var_part))
         if digits:
             try:
                 var_index = int(digits)
@@ -400,14 +403,20 @@ class SimplexSolver:
         return var_index, sign * coefficient
 
     def convertToCanonicalForm(self, constraints, objective):
-        all_var_indices = set()
+        print("=== НАЧАЛО ПРЕОБРАЗОВАНИЯ В КАНОНИЧЕСКУЮ ФОРМУ ===")
+        # Парсим целевую функцию
         obj_coeffs, max_obj_var, is_min = self.parseExpression(objective)
-        for var in obj_coeffs:
-            all_var_indices.add(var)
+        print(f"Парсинг целевой функции: коэффициенты {obj_coeffs}, макс. индекс {max_obj_var}, минимизация={is_min}")
+
+        # Парсим ограничения
         constraint_expressions = []
         constraint_types = []
         rhs_values = []
-        for constraint in constraints:
+        all_var_indices = set(obj_coeffs.keys())
+
+        print("\nПарсинг ограничений:")
+        for i, constraint in enumerate(constraints):
+            print(f"  Ограничение {i + 1}: '{constraint}'")
             if ">=" in constraint:
                 parts = constraint.split(">=")
                 constraint_type = 2
@@ -427,341 +436,408 @@ class SimplexSolver:
             except:
                 rhs_value = 0.0
             coeffs, max_var, _ = self.parseExpression(expr_part)
-            for var in coeffs:
+            print(f"    -> Левая часть: {coeffs}, Правая часть: {rhs_value}, Тип: {('=','<=','>=')[constraint_type] if constraint_type in [0,1,2] else constraint_type}")
+            for var in coeffs.keys():
                 all_var_indices.add(var)
             constraint_expressions.append(coeffs)
             constraint_types.append(constraint_type)
             rhs_values.append(rhs_value)
+
+        # количество реальных переменных
         self.numVariables = max(all_var_indices) if all_var_indices else 0
-        self.numSlackVariables = sum(1 for ct in constraint_types if ct != 0)
-        objLower = objective.lower()
-        self.isMaximization = ("min" not in objLower)
+        print(f"\nОбнаружено переменных (x1..x{self.numVariables}): {list(range(1, self.numVariables + 1))}")
+
+        # подсчёт дополнительных переменных и подготовка структуры
+        num_slack = sum(1 for ct in constraint_types if ct == 1)
+        num_surplus = sum(1 for ct in constraint_types if ct == 2)
+        num_artificial = sum(1 for ct in constraint_types if ct in (0, 2))  # = и >= требуют artificial
+        print("\nОпределение количества дополнительных переменных:")
+        print(f"  Количество <= ограничений: {num_slack}")
+        print(f"  Количество >= ограничений: {num_surplus}")
+        print(f"  Количество = ограничений: {sum(1 for ct in constraint_types if ct == 0)}")
+        print(f"  Искусственных переменных потребуется: {num_artificial}")
+
+        # Общее число добавочных переменных (we will allocate exactly the slots we need)
+        self.numSlackVariables = num_slack + num_surplus + num_artificial
+        total_vars = self.numVariables + self.numSlackVariables
+        print(f"  Общее количество дополнительных переменных: {self.numSlackVariables} (всего переменных в таблице = {total_vars})")
+
+        # Тип оптимизации
+        self.isMaximization = ("min" not in objective.lower())
         self.wasMinimization = not self.isMaximization
+        print(f"Тип задачи: {'Максимизация' if self.isMaximization else 'Минимизация'}")
         if self.wasMinimization:
-            for var in obj_coeffs:
-                obj_coeffs[var] = -obj_coeffs[var]
+            for k in obj_coeffs:
+                obj_coeffs[k] = -obj_coeffs[k]
             self.isMaximization = True
             print("Задача минимизации преобразована в максимизацию (целевая функция домножена на -1)")
-        self.objCoeffs = [0.0] * (self.numVariables + self.numSlackVariables)
+
+        # Формируем objCoeffs для всей расширенной размерности
+        self.objCoeffs = [0.0] * total_vars
         for var, coeff in obj_coeffs.items():
             if 1 <= var <= self.numVariables:
                 self.objCoeffs[var - 1] = coeff
+        print(f"Коэффициенты целевой функции (после преобразований): {self.objCoeffs[:self.numVariables]}")
+
+        # Подготовка временной таблицы
         self.numConstraints = len(constraints)
-        tempTable = [[0.0] * (self.numVariables + self.numSlackVariables + 1) for _ in range(self.numConstraints)]
-        slack_index = 0
+        tempTable = [[0.0] * (total_vars + 1) for _ in range(self.numConstraints)]
+        print(f"\nИнициализирована временная таблица {self.numConstraints}x{total_vars + 1}")
+
+        # Заполнение таблицы: добавляем реальные и дополнительные переменные
+        next_extra = 0
+        row_basis = [-1] * self.numConstraints  # для каждой строки — индекс переменной, которая является базисной
+        self.artificial_vars = []
+
+        print("\nЗаполнение таблицы:")
         for i in range(self.numConstraints):
+            # реальные переменные
             for var, coeff in constraint_expressions[i].items():
                 if 1 <= var <= self.numVariables:
                     tempTable[i][var - 1] = coeff
-            if constraint_types[i] == 1:
-                if slack_index < self.numSlackVariables:
-                    tempTable[i][self.numVariables + slack_index] = 1.0
-                slack_index += 1
-            elif constraint_types[i] == 2:
-                if slack_index < self.numSlackVariables:
-                    tempTable[i][self.numVariables + slack_index] = -1.0
-                slack_index += 1
-            tempTable[i][self.numVariables + self.numSlackVariables] = rhs_values[i]
-        self.originalConstraints = [row[:] for row in tempTable]
-        if not self.useDualSimplex:
-            for i in range(self.numConstraints):
-                if tempTable[i][self.numVariables + self.numSlackVariables] < 0:
-                    for j in range(self.numVariables + self.numSlackVariables + 1):
-                        tempTable[i][j] = -tempTable[i][j]
-        self.findBasisVariables(tempTable)
-        self.buildSimplexTable(tempTable)
 
-    def findBasisVariables(self, tempTable):
-        used = [False] * self.numConstraints
+            ctype = constraint_types[i]
+            if ctype == 1:  # <= : добавляем slack = +1 и делаем её базисной
+                slack_idx = self.numVariables + next_extra
+                tempTable[i][slack_idx] = 1.0
+                row_basis[i] = slack_idx
+                print(f"  Строка {i+1}: добавлена slack x{slack_idx+1} как базис")
+                next_extra += 1
+
+            elif ctype == 2:  # >= : добавляем surplus (-1) и искусственную (+1) — искусственная в базисе
+                surplus_idx = self.numVariables + next_extra
+                tempTable[i][surplus_idx] = -1.0
+                next_extra += 1
+                artificial_idx = self.numVariables + next_extra
+                tempTable[i][artificial_idx] = 1.0
+                row_basis[i] = artificial_idx
+                self.artificial_vars.append(artificial_idx)
+                # ставим "большой" штраф в исходной целевой для искусственных (временно)
+                self.objCoeffs[artificial_idx] = -self.M if self.isMaximization else self.M
+                print(f"  Строка {i+1}: добавлен surplus x{surplus_idx+1} и artificial x{artificial_idx+1} (artificial базис)")
+                next_extra += 1
+
+            elif ctype == 0:  # = : добавляем только искусственную и делаем её базисной
+                artificial_idx = self.numVariables + next_extra
+                tempTable[i][artificial_idx] = 1.0
+                row_basis[i] = artificial_idx
+                self.artificial_vars.append(artificial_idx)
+                self.objCoeffs[artificial_idx] = -self.M if self.isMaximization else self.M
+                print(f"  Строка {i+1}: добавлена artificial x{artificial_idx+1} (базис)")
+                next_extra += 1
+
+            # правая часть
+            tempTable[i][-1] = rhs_values[i] if 'rhs_values' in locals() else rhs_values[i]  # rhs_values определён выше
+            if tempTable[i][-1] < 0:
+                # делаем RHS положительной корректировкой строки
+                for j in range(len(tempTable[i])):
+                    tempTable[i][j] = -tempTable[i][j]
+                print(f"  Строка {i+1} домножена на -1 для положительной правой части")
+
+            print(f"    -> Полная строка {i+1}: {tempTable[i]}")
+
+        # Сохраняем
+        self.originalConstraints = [row[:] for row in tempTable]
+
+        # Формируем self.basis по row_basis (если есть -1, будем заполнять дальше)
         self.basis = []
-        if self.useDualSimplex:
-            for j in range(self.numVariables + self.numSlackVariables):
-                unit_row = -1
-                is_unit_column = True
-                unit_value = 0.0
-                for i in range(self.numConstraints):
-                    if abs(abs(tempTable[i][j]) - 1.0) < 1e-10:
-                        if unit_row == -1:
-                            unit_row = i
-                            unit_value = tempTable[i][j]
-                        else:
-                            is_unit_column = False
-                            break
-                    elif abs(tempTable[i][j]) > 1e-10:
-                        is_unit_column = False
-                        break
-                if is_unit_column and unit_row != -1 and not used[unit_row]:
-                    if unit_value < -0.5:
-                        for col in range(self.numVariables + self.numSlackVariables + 1):
-                            if col < len(tempTable[unit_row]):
-                                tempTable[unit_row][col] = -tempTable[unit_row][col]
-                    self.basis.append(j)
-                    used[unit_row] = True
-            for j in range(self.numVariables + self.numSlackVariables):
-                unit_row = -1
-                is_unit_column = True
-                for i in range(self.numConstraints):
-                    if abs(tempTable[i][j] - 1.0) < 1e-10:
-                        if unit_row == -1:
-                            unit_row = i
-                        else:
-                            is_unit_column = False
-                            break
-                    elif abs(tempTable[i][j]) > 1e-10:
-                        is_unit_column = False
-                        break
-                if is_unit_column and unit_row != -1 and not used[unit_row]:
-                    self.basis.append(j)
-                    used[unit_row] = True
-        else:
-            for j in range(self.numVariables, self.numVariables + self.numSlackVariables):
-                unit_row = -1
-                is_unit_column = True
-                for i in range(self.numConstraints):
-                    if abs(tempTable[i][j] - 1.0) < 1e-10:
-                        if unit_row == -1:
-                            unit_row = i
-                        else:
-                            is_unit_column = False
-                            break
-                    elif abs(tempTable[i][j]) > 1e-10:
-                        is_unit_column = False
-                        break
-                if is_unit_column and unit_row != -1 and not used[unit_row]:
-                    self.basis.append(j)
-                    used[unit_row] = True
-            for j in range(self.numVariables):
-                unit_row = -1
-                is_unit_column = True
-                for i in range(self.numConstraints):
-                    if abs(tempTable[i][j] - 1.0) < 1e-10:
-                        if unit_row == -1:
-                            unit_row = i
-                        else:
-                            is_unit_column = False
-                            break
-                    elif abs(tempTable[i][j]) > 1e-10:
-                        is_unit_column = False
-                        break
-                if is_unit_column and unit_row != -1 and not used[unit_row]:
-                    self.basis.append(j)
-                    used[unit_row] = True
         for i in range(self.numConstraints):
-            if not used[i] and len(self.basis) < self.numConstraints:
-                for j in range(self.numVariables + self.numSlackVariables):
-                    if j not in self.basis:
-                        self.basis.append(j)
-                        used[i] = True
-                        break
-        unique_basis = []
-        for var in self.basis:
-            if var not in unique_basis and len(unique_basis) < self.numConstraints:
-                unique_basis.append(var)
-        self.basis = unique_basis[:self.numConstraints]
-        self.nonBasis = [j for j in range(self.numVariables + self.numSlackVariables) if j not in self.basis]
-        print("Базисные переменные: ", end="")
-        for var in self.basis:
-            print(f"x{var + 1} ", end="")
-        print()
+            if row_basis[i] != -1:
+                self.basis.append(row_basis[i])
+            else:
+                # попробуем найти единичную колонку среди добавочных/реальных
+                found = False
+                for j in range(total_vars):
+                    col_vals = [round(tempTable[r][j], 10) for r in range(self.numConstraints)]
+                    if col_vals.count(1.0) == 1 and all(v == 0.0 or v == 1.0 for v in col_vals):
+                        if j not in self.basis:
+                            self.basis.append(j)
+                            found = True
+                            break
+                if not found:
+                    # запасной план: возьмём первую свободную колонку
+                    for j in range(total_vars):
+                        if j not in self.basis:
+                            self.basis.append(j)
+                            break
+        # гарантируем размер
+        self.basis = self.basis[:self.numConstraints]
+        # nonBasis — все остальные столбцы
+        self.nonBasis = [j for j in range(total_vars) if j not in self.basis]
+
+        print(f"\nИтоговый начальный базис: {[f'x{b+1}' for b in self.basis]}")
+        print(f"Искусственные переменные: {[f'x{v+1}' for v in self.artificial_vars]}")
+
+        # Если есть искусственные — запускаем двухфазный метод
+        if self.artificial_vars:
+            self.twoPhaseSimplex(tempTable)
+        else:
+            self.buildSimplexTable(tempTable)
+
+        print("=== КАНОНИЧЕСКАЯ ФОРМА СФОРМИРОВАНА ===")
 
     def buildSimplexTable(self, tempTable):
+        print("\n=== ПОСТРОЕНИЕ СИМПЛЕКС-ТАБЛИЦЫ ===")
         rows = len(self.basis) + 1
         cols = len(self.nonBasis) + 1
         self.table = [[0.0] * cols for _ in range(rows)]
         self.solution = [0.0] * (self.numVariables + self.numSlackVariables)
+        print(f"Инициализирована таблица {rows}x{cols}")
+
         for i in range(len(self.basis)):
             basis_var = self.basis[i]
-            constraint_row = -1
-            for k in range(self.numConstraints):
-                if basis_var < len(tempTable[k]) and abs(abs(tempTable[k][basis_var]) - 1.0) < 1e-10:
-                    constraint_row = k
+            # найдем строку в tempTable где этот basis_var является единичным
+            row_index = -1
+            for r in range(self.numConstraints):
+                if basis_var < len(tempTable[r]) and abs(tempTable[r][basis_var] - 1.0) < 1e-10:
+                    row_index = r
                     break
-            if constraint_row == -1:
-                max_val = 0
-                for k in range(self.numConstraints):
-                    if basis_var < len(tempTable[k]) and abs(tempTable[k][basis_var]) > abs(max_val):
-                        max_val = tempTable[k][basis_var]
-                        constraint_row = k
-            if constraint_row != -1 and constraint_row < self.numConstraints:
-                for j in range(len(self.nonBasis)):
-                    non_basis_var = self.nonBasis[j]
-                    if non_basis_var < len(tempTable[constraint_row]):
-                        self.table[i][j] = tempTable[constraint_row][non_basis_var]
-                b_index = self.numVariables + self.numSlackVariables
-                if b_index < len(tempTable[constraint_row]):
-                    self.table[i][-1] = tempTable[constraint_row][b_index]
-                    self.solution[basis_var] = self.table[i][-1]
-        for j in range(len(self.nonBasis)):
-            non_basis_var = self.nonBasis[j]
-            delta = self.objCoeffs[non_basis_var] if non_basis_var < len(self.objCoeffs) else 0.0
-            for i in range(len(self.basis)):
-                basis_var = self.basis[i]
-                coeff = self.objCoeffs[basis_var] if basis_var < len(self.objCoeffs) else 0.0
-                delta -= coeff * self.table[i][j]
-            self.table[-1][j] = -delta if self.isMaximization else delta
-        current_obj_value = 0.0
-        for i in range(len(self.basis)):
-            basis_var = self.basis[i]
-            if basis_var < len(self.objCoeffs):
-                current_obj_value += self.objCoeffs[basis_var] * self.solution[basis_var]
-        self.table[-1][-1] = current_obj_value
+            if row_index == -1:
+                # если нет единичной — берём любую строку (плохой кейс)
+                for r in range(self.numConstraints):
+                    if basis_var < len(tempTable[r]) and abs(tempTable[r][basis_var]) > 1e-10:
+                        row_index = r
+                        break
+            if row_index == -1:
+                continue
+            for j, nb in enumerate(self.nonBasis):
+                if nb < len(tempTable[row_index]):
+                    self.table[i][j] = tempTable[row_index][nb]
+            self.table[i][-1] = tempTable[row_index][-1]
+            if basis_var < len(self.solution):
+                self.solution[basis_var] = self.table[i][-1]
+            print(f"  Строка {i+1} таблицы (basis x{basis_var+1}): {self.table[i]}")
 
-    def findPivotColumn(self):
-        last_row = len(self.table) - 1
-        pivot_col = -1
-        min_val = 0.0
-        for j in range(len(self.table[0]) - 1):
-            if self.table[last_row][j] < min_val - 1e-10:
-                min_val = self.table[last_row][j]
-                pivot_col = j
-        return pivot_col
-
-    def findPivotRow(self, pivot_col):
-        pivot_row = -1
-        min_ratio = float('inf')
-        for i in range(len(self.table) - 1):
-            if self.table[i][pivot_col] > 1e-10:
-                ratio = self.table[i][-1] / self.table[i][pivot_col]
-                if ratio + 1e-10 < min_ratio:
-                    min_ratio = ratio
-                    pivot_row = i
-        return pivot_row
+        # заполнить строку оценок
+        self.recalculateDeltaRow()
+        print("=== СИМПЛЕКС-ТАБЛИЦА ПОСТРОЕНА ===")
 
     def performPivot(self, pivot_row, pivot_col):
         entering_var = self.nonBasis[pivot_col]
         leaving_var = self.basis[pivot_row]
-        old_table = [row[:] for row in self.table]
-        pivot_element = old_table[pivot_row][pivot_col]
+        print(f"    Pivot: x{leaving_var+1} (out) <-> x{entering_var+1} (in)")
+        # классический Gauss-Jordan
+        pivot_element = self.table[pivot_row][pivot_col]
+        if abs(pivot_element) < 1e-12:
+            raise ZeroDivisionError("Разрешающий элемент равен нулю при выполнении pivot")
+
+        # нормализация ведущей строки
         for j in range(len(self.table[0])):
-            self.table[pivot_row][j] = old_table[pivot_row][j] / pivot_element
+            self.table[pivot_row][j] /= pivot_element
+
+        # зануляем остальные строки
         for i in range(len(self.table)):
-            if i != pivot_row:
+            if i == pivot_row:
+                continue
+            factor = self.table[i][pivot_col]
+            if abs(factor) > 1e-12:
                 for j in range(len(self.table[0])):
-                    if j != pivot_col:
-                        self.table[i][j] = old_table[i][j] - (old_table[i][pivot_col] * old_table[pivot_row][j]) / pivot_element
-        for i in range(len(self.table)):
-            if i != pivot_row:
-                self.table[i][pivot_col] = -old_table[i][pivot_col] / pivot_element
+                    self.table[i][j] -= factor * self.table[pivot_row][j]
+                # чтобы избежать маленьких чисел
+                self.table[i][pivot_col] = 0.0
+
+        # обновляем базис/небазис
         self.basis[pivot_row] = entering_var
         self.nonBasis[pivot_col] = leaving_var
-        self.solution = [0.0] * (self.numVariables + self.numSlackVariables + 1)
+
+        # обновляем solution (значения переменных)
+        total_vars = self.numVariables + self.numSlackVariables
+        self.solution = [0.0] * total_vars
         for i in range(len(self.basis)):
-            self.solution[self.basis[i]] = self.table[i][-1]
+            bvar = self.basis[i]
+            if i < len(self.table):
+                self.solution[bvar] = self.table[i][-1]
+
+        # пересчитать строку дельт
+        self.recalculateDeltaRow()
+
+        print(f"    Новый базис: {[f'x{b+1}' for b in self.basis]}")
+
+    def findPivotIndices(self):
+        last_row = len(self.table) - 1
+        pivot_col = -1
+        min_val = 0.0
+        print("  Поиск разрешающего столбца (наиболее отрицательная дельта):")
+        for j in range(len(self.table[0]) - 1):
+            val = self.table[last_row][j]
+            nb_var = self.nonBasis[j]
+            print(f"    x{nb_var+1}: Δ = {val}")
+            if val < min_val - 1e-12:
+                min_val = val
+                pivot_col = j
+        if pivot_col == -1:
+            return -1, -1
+
+        pivot_row = -1
+        min_ratio = float('inf')
+        print("  Поиск разрешающей строки (метод отношения):")
+        for i in range(len(self.table) - 1):
+            a = self.table[i][pivot_col]
+            b = self.table[i][-1]
+            if a > 1e-12:
+                ratio = b / a
+                print(f"    Строка {i+1}: b={b}, a={a}, ratio={ratio}")
+                if ratio < min_ratio - 1e-12:
+                    min_ratio = ratio
+                    pivot_row = i
+            else:
+                print(f"    Строка {i+1}: a={a} <= 0, пропускаем")
+        return pivot_col, pivot_row
 
     def solve(self):
-        iterations = 0
-        max_iterations = 100
-        print("Начинаем решение симплекс-методом...")
-        self.printTable()
-        while iterations < max_iterations:
-            pivot_col = self.findPivotColumn()
-            if pivot_col == -1:
-                print("Оптимальное решение найдено!")
-                return True
-            pivot_row = self.findPivotRow(pivot_col)
-            if pivot_row == -1:
-                print("Задача неограничена")
-                return False
-            print(f"Итерация {iterations + 1}: разрешающий элемент: строка {pivot_row + 1}, столбец {pivot_col + 1} = {self.table[pivot_row][pivot_col]}")
-            self.performPivot(pivot_row, pivot_col)
-            iterations += 1
-            print(f"Таблица после итерации {iterations}:")
+        print("\n=== НАЧАЛО РЕШЕНИЯ СИМПЛЕКС-МЕТОДОМ ===")
+        iter_count = 0
+        max_iter = 200
+        while iter_count < max_iter:
+            print(f"\n--- ИТЕРАЦИЯ {iter_count+1} ---")
             self.printTable()
-        print("Превышено максимальное число итераций")
+            pivot_col, pivot_row = self.findPivotIndices()
+            if pivot_col == -1:
+                print("Оптимум достигнут (все Δ >= 0).")
+                return True
+            if pivot_row == -1:
+                print("Задача неограничена (нет положительных a_ij в столбце).")
+                return False
+            print(f"Разрешающий элемент в строке {pivot_row+1}, столбце {pivot_col+1}")
+            self.performPivot(pivot_row, pivot_col)
+            iter_count += 1
+        print("Превышен лимит итераций.")
         return False
 
+    def recalculateDeltaRow(self):
+        rows = len(self.table)
+        cols = len(self.table[0])
+        for j in range(cols - 1):
+            nb_var = self.nonBasis[j]
+            c_j = self.objCoeffs[nb_var] if nb_var < len(self.objCoeffs) else 0.0
+            z_j = 0.0
+            for i in range(rows - 1):
+                bvar = self.basis[i]
+                c_b = self.objCoeffs[bvar] if bvar < len(self.objCoeffs) else 0.0
+                z_j += c_b * self.table[i][j]
+            delta = z_j - c_j
+            # для максимизации мы хотим Δ >= 0
+            self.table[rows - 1][j] = delta
+
+        # вычисляем значение Z
+        zvalue = 0.0
+        for i in range(rows - 1):
+            bvar = self.basis[i]
+            c_b = self.objCoeffs[bvar] if bvar < len(self.objCoeffs) else 0.0
+            zvalue += c_b * self.table[i][-1]
+        self.table[rows - 1][-1] = zvalue
+
     def printTable(self):
-        print("\n" + "Базис".rjust(8), end="")
-        for j, var in enumerate(self.nonBasis):
-            print(f"x{var + 1}".rjust(10), end="")
-        print("b".rjust(10))
+        if not self.table:
+            print("Таблица пуста")
+            return
+        # заголовки
+        header = ["Базис"] + [f"x{v+1}" for v in self.nonBasis] + ["b"]
+        print(" | ".join(x.rjust(8) for x in header))
         for i in range(len(self.basis)):
-            basis_var = self.basis[i]
-            print(f"x{basis_var + 1}".rjust(8), end="")
-            for j in range(len(self.nonBasis)):
-                val = self.table[i][j]
-                print(f"{val:.3f}".rjust(10) if abs(val) > 1e-10 else "0".rjust(10), end="")
-            b_val = self.table[i][-1]
-            print(f"{b_val:.3f}".rjust(10) if abs(b_val) > 1e-10 else "0".rjust(10))
-        print("Дельта".rjust(8), end="")
-        for j in range(len(self.nonBasis)):
-            val = self.table[-1][j]
-            print(f"{val:.3f}".rjust(10) if abs(val) > 1e-10 else "0".rjust(10), end="")
-        obj_val = self.table[-1][-1]
-        print(f"{obj_val:.3f}".rjust(10) if abs(obj_val) > 1e-10 else "0".rjust(10))
-        print()
+            row = [f"x{self.basis[i]+1}".rjust(8)]
+            row += [f"{self.table[i][j]:8.3f}" for j in range(len(self.table[0]) - 1)]
+            row.append(f"{self.table[i][-1]:8.3f}")
+            print(" | ".join(row))
+        # строка дельт
+        drow = ["Δ".rjust(8)] + [f"{self.table[-1][j]:8.3f}" for j in range(len(self.table[0]) - 1)] + [f"{self.table[-1][-1]:8.3f}"]
+        print(" | ".join(drow))
 
     def printSolution(self):
         print("\n=== РЕЗУЛЬТАТЫ ===")
-        objective_value = sum(self.objCoeffs[i] * self.solution[i] for i in range(self.numVariables))
-        if self.wasMinimization:
-            objective_value = -objective_value
-            print("Исходная задача была минимизацией — значение восстановлено")
-        print("Оптимальное решение:")
+        total_vars = self.numVariables + self.numSlackVariables
+        for i in range(total_vars):
+            val = self.solution[i] if i < len(self.solution) else 0.0
+            if abs(val) < 1e-10:
+                val = 0.0
+            name = f"x{i+1}"
+            if i >= self.numVariables:
+                name += " (добавочная)"
+            print(f"{name} = {val:.6f}")
+        # значение целевой
+        z = 0.0
         for i in range(self.numVariables):
-            value = self.solution[i] if i < len(self.solution) else 0.0
-            if abs(value) < 1e-10: value = 0.0
-            print(f"x{i + 1} = {value:.3f}")
-        for i in range(self.numSlackVariables):
-            idx = self.numVariables + i
-            value = self.solution[idx] if idx < len(self.solution) else 0.0
-            if abs(value) < 1e-10: value = 0.0
-            print(f"x{idx + 1} (добавочная) = {value:.3f}")
-        print(f"Значение целевой функции: {objective_value:.3f} ({'минимум' if self.wasMinimization else 'максимум'})")
+            if i < len(self.objCoeffs) and i < len(self.solution):
+                z += self.objCoeffs[i] * self.solution[i]
+        if self.wasMinimization:
+            z = -z
+        print(f"Z = {z:.6f} ({'максимум' if not self.wasMinimization else 'минимум'})")
 
-    def buildDualProblem(self):
-        print("\n=== ПОСТРОЕНИЕ ДВОЙСТВЕННОЙ ЗАДАЧИ ===")
-        dual_is_max = not self.isMaximization
-        self.dualObjCoeffs = [self.originalConstraints[i][-1] for i in range(self.numConstraints)]
-        dual_constraints = []
-        for j in range(self.numVariables):
-            row = [self.originalConstraints[i][j] for i in range(self.numConstraints)]
-            row.append(self.objCoeffs[j])
-            dual_constraints.append(row)
-        print("Двойственная задача:")
-        prefix = "max: " if dual_is_max else "min: "
-        terms = []
-        for i, c in enumerate(self.dualObjCoeffs):
-            sign = "+" if i > 0 and c >= 0 else ""
-            terms.append(f"{sign}{c}y{i+1}")
-        print(prefix + "".join(terms))
-        print("Ограничения:")
-        for j, row in enumerate(dual_constraints):
-            terms = []
-            for i, c in enumerate(row[:-1]):
-                sign = "+" if i > 0 and c >= 0 else ""
-                terms.append(f"{sign}{c}y{i+1}")
-            print("".join(terms) + f" >= {row[-1]}")
-        print("Условия неотрицательности двойственных переменных:")
-        for i in range(self.numConstraints):
-            print(f"y{i + 1} >= 0")
+    # Предполагается, что twoPhaseSimplex реализует фазу 1 и фазу 2 (упрощённо)
+    def twoPhaseSimplex(self, tempTable):
+        print("\n=== ДВУХЭТАПНЫЙ СИМПЛЕКС (ФАЗА 1) ===")
+        # Сохраним исходную целевую
+        original_obj = self.objCoeffs[:]
+        # Формируем фазу1: минимизация суммы искусственных -> в форме максимизации делаем с отрицанием
+        phase1_obj = [0.0] * len(self.objCoeffs)
+        for art in self.artificial_vars:
+            phase1_obj[art] = 1.0  # минимизируем сумму => для нашей схемы оставляем +1 и потом будем искать минимум по Δ>0
 
-    def solveDualFromPrimal(self):
-        print("\n=== РЕШЕНИЕ ДВОЙСТВЕННОЙ ЗАДАЧИ ИЗ ПРЯМОЙ ===")
-        if not self.table:
-            print("Сначала решите прямую задачу!")
-            return
-        dual_solution = [0.0] * self.numConstraints
-        for i in range(self.numConstraints):
-            slack_idx = self.numVariables + i
-            for j, nb in enumerate(self.nonBasis):
-                if nb == slack_idx:
-                    dual_solution[i] = abs(self.table[-1][j])
-                    break
-        dual_obj = sum(dual_solution[i] * self.originalConstraints[i][-1] for i in range(self.numConstraints))
-        print("Решение двойственной задачи:")
-        for i in range(self.numConstraints):
-            print(f"y{i + 1} = {dual_solution[i]:.3f}")
-        print(f"Значение целевой функции двойственной задачи: {dual_obj:.3f}")
+        self.objCoeffs = phase1_obj
+        # Построим таблицу для фазы1 используя существующий базис/небазис
+        self.buildSimplexTable(tempTable)
+        # Теперь преобразуем в задачу минимизации: в нашем реализации будем искать положительные Δ в строке оценок
+        success = self.solvePhase1()
+        if not success:
+            print("Фаза 1 не дала допустимого решения.")
+            return False
+        # Проверяем: искусственные должны иметь нулевые значения (или быть вынесены)
+        for art in self.artificial_vars:
+            if art in self.basis:
+                print(f"Искусственная x{art+1} осталась в базисе -> проблема.")
+                # Попытка удалить: если значение RHS==0 — можно выкинуть столбец
+                idx = self.basis.index(art)
+                if abs(self.table[idx][-1]) < 1e-10:
+                    # выкидываем столбец artificial из nonBasis/basis/objCoeffs
+                    pass
+        # Восстанавливаем исходную целевую
+        self.objCoeffs = original_obj
+        # удаление столбцов искусственных переменных из таблицы и nonBasis (можно реализовать при необходимости)
+        # Пересчитываем дельты под исходную цель
+        self.updateObjectiveRow()
+        print("\nПереход ко ФАЗЕ 2 (исходная целевая):")
+        return self.solve()
 
-    def solvePrimalAndDual(self):
-        print("\n=== РЕШЕНИЕ ПРЯМОЙ И ДВОЙСТВЕННОЙ ЗАДАЧ ===")
-        print("\n--- РЕШЕНИЕ ПРЯМОЙ ЗАДАЧИ ---")
-        if self.solve():
-            self.printSolution()
-            self.buildDualProblem()
-            self.solveDualFromPrimal()
+    def solvePhase1(self):
+        print("Решаем фазу 1 (минимизация суммы искусственных):")
+        iter_cnt = 0
+        max_iter = 200
+        # в фазе 1 будем считать, что нужно уменьшать суммарную величину (ищем положительные дельты)
+        while iter_cnt < max_iter:
+            # найти столбец с наибольшей положительной дельтой
+            last_row = len(self.table) - 1
+            pivot_col = -1
+            max_d = 0.0
+            for j in range(len(self.table[0]) - 1):
+                val = self.table[last_row][j]
+                if val > max_d + 1e-12:
+                    max_d = val
+                    pivot_col = j
+            if pivot_col == -1:
+                print("Фаза 1 оптимальна (нет положительных Δ).")
+                return True
+            # найдем разрешающую строку как обычно
+            pivot_row = -1
+            min_ratio = float('inf')
+            for i in range(len(self.table) - 1):
+                a = self.table[i][pivot_col]
+                b = self.table[i][-1]
+                if a > 1e-12:
+                    ratio = b / a
+                    if ratio < min_ratio - 1e-12:
+                        min_ratio = ratio
+                        pivot_row = i
+            if pivot_row == -1:
+                print("Фаза 1: задача неограничена.")
+                return False
+            self.performPivot(pivot_row, pivot_col)
+            iter_cnt += 1
+        print("Фаза 1: превышен лимит итераций.")
+        return False
 
+    def updateObjectiveRow(self):
+        # обновляем строку дельт под текущую self.objCoeffs
+        self.recalculateDeltaRow()
 
 class DualSimplexSolver(SimplexSolver):
     def __init__(self):
@@ -769,6 +845,10 @@ class DualSimplexSolver(SimplexSolver):
         self.setUseDualSimplex(True)
 
     def findDualPivotRow(self):
+        # Выбор разрешающей строки:
+        # Находим строку с отрицательной правой частью (bi < 0)
+        # Выбираем строку с минимальным bi
+
         pivot_row = -1
         min_val = 0.0
         for i in range(len(self.table) - 1):
@@ -778,6 +858,10 @@ class DualSimplexSolver(SimplexSolver):
         return pivot_row
 
     def findDualPivotColumn(self, pivot_row):
+        # Выбор разрешающего столбца:
+        # Для выбранной строки находим столбец по правилу:
+        # min(|Δj / aij|) для aij < 0
+
         pivot_col = -1
         min_ratio = float('inf')
         for j in range(len(self.table[0]) - 1):
@@ -789,6 +873,14 @@ class DualSimplexSolver(SimplexSolver):
         return pivot_col
 
     def solve(self):
+
+        # Алгоритм двойственного симплекс-метода:
+        # 1. Проверяем допустимость: все bi ≥ 0
+        # 2. Если есть bi < 0, выбираем разрешающую строку
+        # 3. Выбираем разрешающий столбец
+        # 4. Выполняем шаг преобразования
+        # 5. Повторяем до тех пор, пока все bi ≥ 0
+
         iterations = 0
         max_iterations = 100
         print("Начинаем решение двойственным симплекс-методом...")
@@ -1108,7 +1200,7 @@ def run_simplex_gui():
     ttk.Label(win, text="Целевая функция (например: max 2x1 + 3x2):").pack(pady=5)
     obj_entry = ttk.Entry(win, width=70)
     obj_entry.pack(pady=5)
-    obj_entry.insert(0, "max 2x1 - x2 + 3x3 + x4")
+    obj_entry.insert(0, "max -2x1 -x2 +x3 +x4")
     ttk.Label(win, text="Количество ограничений:").pack(pady=5)
     cons_count = ttk.Spinbox(win, from_=1, to=10, width=10)
     cons_count.pack(pady=5)
@@ -1126,7 +1218,7 @@ def run_simplex_gui():
             lbl.grid(row=i, column=0, sticky='e', padx=5, pady=3)
             ent = ttk.Entry(constraints_frame, width=50)
             ent.grid(row=i, column=1, padx=5, pady=3)
-            ent.insert(0, ["2x1 + x2 - 3x3 = 10", "x1 + x3 + x4 = 7", "3x1 + 2x3 - x5 = -4"][i] if i < 3 else "")
+            ent.insert(0, ["x1 - x2 + 2x3 - x4 = 2", "2x1 + x2 - 3x3 + x4 = 6", "-x1 + 3x2 + 2x3 + x4 = 2"][i] if i < 3 else "")
             cons_entries.append(ent)
     ttk.Button(win, text="Обновить ограничения", command=update_constraints).pack(pady=10)
     update_constraints()
