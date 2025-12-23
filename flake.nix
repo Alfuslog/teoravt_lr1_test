@@ -20,14 +20,13 @@
         {
           default = pkgs.mkShell {
             buildInputs = [
-              pkgs.glibcLocales
               pkgs.python3
               pkgs.uv
+              pkgs.fontconfig
             ];
 
-            # LOCALE_ARCHIVE = "${pkgs.glibcLocales}/lib/locale/locale-archive";
-            # LANG = "ru_RU.UTF-8";
-            # LC_ALL = "ru_RU.UTF-8";
+            LC_ALL = "ru_RU.UTF-8";
+            LC_CTYPE = "ru_RU.UTF-8";
 
             shellHook = ''
               unset PYTHONPATH
