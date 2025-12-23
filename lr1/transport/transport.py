@@ -162,7 +162,7 @@ def tp_make_not_degenerate(t: TransportTable) -> tuple[str, TransportTable]:
             if basic_cells_count() >= m + n - 1:
                 break
 
-            # можно добавить ε только в пустую клетку
+            # можно добавить e только в пустую клетку
             if t.alloc[i][j] == 0:
                 t.alloc[i][j] = float("inf")
                 added += 1
@@ -171,9 +171,9 @@ def tp_make_not_degenerate(t: TransportTable) -> tuple[str, TransportTable]:
             break
 
     if basic_cells_count() < m + n - 1:
-        return ("Не удалось устранить вырождение", t)
+        return ("не удалось устранить вырождение", t)
 
-    return (f"Добавлено ε-клеток: {added}", t)
+    return (f"добавлено e-клеток: {added}", t)
 
 # метод потенцевалов
 def tp_check_optimal(t: TransportTable) -> tuple[bool, str, TransportTable]:
@@ -199,15 +199,18 @@ def tp_check_optimal(t: TransportTable) -> tuple[bool, str, TransportTable]:
 
     # проверка оценок
     d = [[0.0]*cols for _ in range(rows)]
+    is_opt = True
     for i in range(rows):
         for j in range(cols):
             if t.alloc[i][j] == 0:
                 delta = t.grid[i][j] - (u[i] + v[j])
                 d[i][j] = delta
                 if delta < 0:
-                    return (False, f"План неоптимален, найдено улучшение\nДельты:\n{tabulate(d)}", TransportTable(t.grid, t.supply, t.demand, t.alloc, u, v))
+                    is_opt = False
+            else:
+                d[i][j] = t.grid[i][j]
 
-    return (True, f"План оптимален\nДельты\n{tabulate(d)}", TransportTable(t.grid, t.supply, t.demand, t.alloc, u, v))
+    return (is_opt, f"План {"оптимaлен" if is_opt else "не оптимелен"}\nДельты\n{tabulate(d)}", TransportTable(t.grid, t.supply, t.demand, t.alloc, u, v))
 
 
 @dataclass
@@ -236,10 +239,11 @@ def tp_solve(t: TransportTable, method: str = "nwcm") -> TransportSolution:
 
     # проверка вырожденности
     N = sum(1 for r in t.alloc for c in r if c > 0) # колво ячеек в решении
-    is_degenerate = N < len(t.supply) + len(t.demand) - 1
+    mn = len(t.supply) + len(t.demand) - 1
+    is_degenerate = N < mn
     if is_degenerate:
+        sol.stages.append((f"План вырожденнйы!! колво базисных клекток: {N}\nКолво остального: {mn}", t))
         m, t = tp_make_not_degenerate(t)
-    sol.stages.append((f"План вырожденнйы!! колво базисных клекток:{N}", t))
     is_optimal, m, t = tp_check_optimal(t)
 
     sol.stages.append((
@@ -252,11 +256,12 @@ def tp_solve(t: TransportTable, method: str = "nwcm") -> TransportSolution:
 # тесты
 if __name__ == "__main__":
     t = TransportTable(
-        [[4, 3, 4, 5, 3],
-         [2, 4, 5, 7, 8],
-         [4, 3, 7, 2, 1]],
-        [250, 200, 220],
-        [140, 110, 170, 90, 140])
-    print(tp_solve(t))
+        [[3, 4, 3, 1],
+         [2, 3, 5, 6],
+         [1, 2, 3, 3],
+         [4, 5, 7, 9]],
+        [300, 200, 100, 200],
+        [300, 200, 300, 100])
+    print(tp_solve(t, method="lccm"))
 
    
